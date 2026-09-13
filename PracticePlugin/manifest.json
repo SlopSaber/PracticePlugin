@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/nike4613/ModSaber-MetadataFileSchema/master/Schema.json",
   "author": "denpadokei",
   "description": "Plugin for Beat Saber to control playback speed, seek through songs and set up looping sections.",
-  "gameVersion": "1.44.1",
+  "gameVersion": "1.45.0",
   "id": "PracticePlugin",
   "name": "PracticePlugin",
   "version": "9.1.1",
