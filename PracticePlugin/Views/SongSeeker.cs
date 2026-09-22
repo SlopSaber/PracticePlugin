@@ -100,11 +100,11 @@ namespace PracticePlugin.Views
             this._seekCursor.type = Image.Type.Simple;
             this._seekCursor.color = s_seekCursorColor;
             this._seekCursor.material = Utilities.ImageResources.NoGlowMat;
-            this._currentTime = BeatSaberUI.CreateText(this.GetComponent<RectTransform>(), "0:00", new Vector2(-83f, -1f));
+            this._currentTime = BeatSaberUI.CreateCurvedUIText(this.GetComponent<RectTransform>(), "0:00", new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(-83f, -1f), new Vector2(60f, 10f));
             this._currentTime.fontSize = 5f;
             this._currentTime.alignment = TextAlignmentOptions.Right;
 
-            this._timeLength = BeatSaberUI.CreateText(this.GetComponent<RectTransform>(), "0:00", new Vector2(87f, -1f));
+            this._timeLength = BeatSaberUI.CreateCurvedUIText(this.GetComponent<RectTransform>(), "0:00", new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(87f, -1f), new Vector2(60f, 10f));
             this._timeLength.fontSize = 5f;
 
             this._looperUI.gameObject.transform.SetParent(this._seekBar.rectTransform, false);

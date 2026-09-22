@@ -22,8 +22,8 @@ namespace PracticePlugin.Installers
         }
 
         [Inject]
-        private readonly GameplayCoreSceneSetupData _gameplayCoreSceneSetupData;
+        private GameplayCoreSceneSetupData _gameplayCoreSceneSetupData { get; set; }
         [Inject]
-        private readonly SongTimeInfoEntity _songTimeInfoEntity;
+        private SongTimeInfoEntity _songTimeInfoEntity { get; set; }
     }
 }
