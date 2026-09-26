@@ -23,6 +23,8 @@ namespace PracticePlugin.Views
         private LooperUI _looperUI;
         private TMP_Text _currentTime;
         private TMP_Text _timeLength;
+        private Sprite _sprite;
+        private long _displayedSecond = long.MinValue;
         private const float s_aheadTime = 1f;
         private IGamePause _gamePause;
 
@@ -61,6 +63,7 @@ namespace PracticePlugin.Views
             this.gameObject.AddComponent<RectTransform>();
             var tex = Texture2D.whiteTexture;
             var sprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), Vector2.one * 0.5f, 100, 1);
+            this._sprite = sprite;
 
             var rectTransform = this.transform as RectTransform;
             rectTransform.anchorMin = Vector2.right * 0.5f;
@@ -181,9 +184,12 @@ namespace PracticePlugin.Views
         }
         protected void OnDestroy()
         {
-            this._looperUI.OnDragEndEvent -= this.LooperUIOnOnDragEndEvent;
-            this._gamePause.didPauseEvent -= this.OnGamePause_didPauseEvent;
-            this._gamePause.willResumeEvent -= this.OnGamePause_willResumeEvent;
+            if (this._sprite != null) Destroy(this._sprite);
+            if (this._looperUI != null) this._looperUI.OnDragEndEvent -= this.LooperUIOnOnDragEndEvent;
+            if (this._gamePause != null) {
+                this._gamePause.didPauseEvent -= this.OnGamePause_didPauseEvent;
+                this._gamePause.willResumeEvent -= this.OnGamePause_willResumeEvent;
+            }
         }
 
         public void OnDrag(PointerEventData eventData)
@@ -223,10 +229,14 @@ namespace PracticePlugin.Views
 
         private void UpdateCurrentTimeText(float playbackPos)
         {
-            if (this._currentTime == null || this._songAudioSource == null) {
+            if (this._currentTime == null || this._songAudioSource == null || this._songAudioSource.clip == null) {
                 return;
             }
-            this._currentTime.text = FormatTimeSpan(TimeSpan.FromSeconds(Mathf.Lerp(0, this._songAudioSource.clip.length, playbackPos)));
+            var time = TimeSpan.FromSeconds(Mathf.Lerp(0, this._songAudioSource.clip.length, playbackPos));
+            var second = time.Ticks / TimeSpan.TicksPerSecond;
+            if (second == this._displayedSecond) return;
+            this._currentTime.text = FormatTimeSpan(time);
+            this._displayedSecond = second;
         }
 
         private void CheckLooperCursorStick()

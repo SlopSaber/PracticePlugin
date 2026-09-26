@@ -42,9 +42,14 @@ namespace PracticePlugin.Models
         private void GamePause_didPauseEvent()
         {
             if (PluginConfig.Instance.EnableGC) {
-                GarbageCollector.GCMode = GarbageCollector.Mode.Enabled;
-                GC.Collect();
-                GarbageCollector.GCMode = GarbageCollector.Mode.Disabled;
+                var previousMode = GarbageCollector.GCMode;
+                try {
+                    GarbageCollector.GCMode = GarbageCollector.Mode.Enabled;
+                    GC.Collect();
+                }
+                finally {
+                    GarbageCollector.GCMode = previousMode;
+                }
             }
         }
 

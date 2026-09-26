@@ -29,6 +29,7 @@ namespace PracticePlugin.Views
         private static float s_prevStartTime = 0f;
         private static float s_prevEndTime = 1f;
         private ImageView _lineDuration;
+        private Sprite _sprite;
 
         private LooperCursor _startCursor;
         private LooperCursor _endCursor;
@@ -57,6 +58,7 @@ namespace PracticePlugin.Views
             }
             var tex = Texture2D.whiteTexture;
             var sprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), Vector2.one * 0.5f, 100, 1);
+            this._sprite = sprite;
 
             var bg = new GameObject("Background").AddComponent<ImageView>();
             var rectTransform = bg.rectTransform;
@@ -155,14 +157,17 @@ namespace PracticePlugin.Views
 
         protected void OnDestroy()
         {
-            this._startCursor.BeginDragEvent -= this.CursorOnBeginDragEvent;
-            this._startCursor.EndDragEvent -= this.CursorOnEndDragEvent;
-
-            this._endCursor.BeginDragEvent -= this.CursorOnBeginDragEvent;
-            this._endCursor.EndDragEvent -= this.CursorOnEndDragEvent;
-
-            s_prevStartTime = this.StartTime;
-            s_prevEndTime = this.EndTime;
+            if (this._sprite != null) Destroy(this._sprite);
+            if (!(this._startCursor is null)) {
+                this._startCursor.BeginDragEvent -= this.CursorOnBeginDragEvent;
+                this._startCursor.EndDragEvent -= this.CursorOnEndDragEvent;
+                s_prevStartTime = this.StartTime;
+            }
+            if (!(this._endCursor is null)) {
+                this._endCursor.BeginDragEvent -= this.CursorOnBeginDragEvent;
+                this._endCursor.EndDragEvent -= this.CursorOnEndDragEvent;
+                s_prevEndTime = this.EndTime;
+            }
         }
 
         private void ChangeSongStartTime()

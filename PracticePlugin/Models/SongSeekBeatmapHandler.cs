@@ -108,24 +108,24 @@ namespace PracticePlugin.Models
             this.DespawnNotes(basicGameNotePoolContainer);
             this.DespawnNotes(burstSliderHeadGameNotePoolContainer);
             this.DespawnNotes(burstSliderGameNotePoolContainer);
-            foreach (var item in obstaclePoolContainer.activeItems) {
+            foreach (var item in obstaclePoolContainer.activeItems.ToArray()) {
                 if (item == null) {
                     continue;
                 }
                 item._finishMovementTime = -1f;
                 item.ManualUpdate();
             }
-            while (cutSoundPoolContainer.activeItems.Any()) {
-                var item = cutSoundPoolContainer.activeItems.First();
+            foreach (var item in cutSoundPoolContainer.activeItems.ToArray()) {
                 item?.StopPlayingAndFinish();
             }
             if (this._sliderInteractionManager == null) {
                 this._sliderInteractionManager = Resources.FindObjectsOfTypeAll<SliderInteractionManager>();
             }
             foreach (var mang in this._sliderInteractionManager) {
+                if (mang == null) continue;
                 var activeSlider = mang._activeSliders;
-                while (activeSlider.Any()) {
-                    mang?.RemoveActiveSlider(activeSlider?.First());
+                foreach (var slider in activeSlider.ToArray()) {
+                    mang.RemoveActiveSlider(slider);
                 }
                 foreach (var item in mang?.GetComponentsInChildren<SliderHapticFeedbackInteractionEffect>()) {
                     item.enabled = false;
@@ -143,8 +143,9 @@ namespace PracticePlugin.Models
             if (memoryPoolContainer == null) {
                 return;
             }
-            while (memoryPoolContainer.activeItems.Any()) {
-                var item = memoryPoolContainer.activeItems.First();
+            // Callbacks dirty the pool's cached list; snapshot it once before despawning.
+            foreach (var item in memoryPoolContainer.activeItems.ToArray()) {
+                if (item == null) continue;
                 this.RaiseCustomNoteMissEvent(item);
                 var movement = item?._noteMovement;
 #if false
