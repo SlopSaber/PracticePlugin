@@ -42,6 +42,12 @@ namespace PracticePlugin
             catch (Exception e) {
                 Log.Error(e);
             }
+            try {
+                Models.SeekMetadataPreparation.Prewarm();
+            }
+            catch (Exception e) {
+                Log.Error(e);
+            }
             zenjector.Install<PlayerInstaller>(Location.StandardPlayer);
             zenjector.Install<PracticeMenuInstaller>(Location.Menu);
             zenjector.Install<PracticeAppInstaller>(Location.App);

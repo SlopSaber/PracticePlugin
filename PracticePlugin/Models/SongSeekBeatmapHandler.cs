@@ -1,10 +1,13 @@
 ﻿using HarmonyLib;
 using IPA.Loader;
 using IPA.Utilities;
+using IPA.Utilities.Async;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
 using UnityEngine;
 using Zenject;
 
@@ -36,6 +39,23 @@ namespace PracticePlugin.Models
             if (callBackManager != null) {
                 this._noodleObjectsCallbacksManager = di.TryResolve(callBackManager);
             }
+            _metadataPreparation = SeekMetadataPreparation.Prepare(
+                _noodleObjectsCallbacksManager == null ? null : callBackManager, s_customNotesControllerInfo);
+            _metadataPreparation.ContinueWith(completed => {
+                if (_disposed) {
+                    if (completed.IsFaulted) _ = completed.Exception;
+                    return;
+                }
+                try {
+                    _seekMetadata = completed.GetAwaiter().GetResult();
+                    ResumePendingSeek();
+                }
+                catch (Exception e) {
+                    ClearPendingSeek();
+                    Logger.Error(e);
+                }
+            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously,
+                UnityMainThreadTaskScheduler.Default);
         }
 
         private void OnGameEnergyCounter_gameEnergyDidReach0Event()
@@ -52,7 +72,6 @@ namespace PracticePlugin.Models
         private readonly BasicBeatmapObjectManager _beatmapObjectManager;
         private readonly object _noodleObjectsCallbacksManager;
         private static readonly Type s_customNotesControllerInfo = null;
-        private static readonly MethodInfo s_handleNoteControllerNoteWasMissed = null;
         private static readonly float s_minAheadTime = 1f;
         private SliderInteractionManager[] _sliderInteractionManager = null;
         private readonly IGameEnergyCounter _gameEnergyCounter;
@@ -61,13 +80,15 @@ namespace PracticePlugin.Models
         private float? _pendingSongTime;
         private bool _waitingForCompatibility;
         private bool _disposed;
+        private readonly Task<SeekMetadataPreparation.Result> _metadataPreparation;
+        private SeekMetadataPreparation.Result _seekMetadata;
 
         static SongSeekBeatmapHandler()
         {
             var info = PluginManager.GetPlugin("CustomNotes");
             if (info != null) {
                 s_customNotesControllerInfo = Type.GetType("CustomNotes.Components.CustomNoteController, CustomNotes");
-                s_handleNoteControllerNoteWasMissed = s_customNotesControllerInfo.GetMethod("HandleNoteControllerNoteWasMissed", BindingFlags.Instance | BindingFlags.Public);
+                if (s_customNotesControllerInfo == null) throw new NullReferenceException();
             }
         }
 
@@ -76,7 +97,7 @@ namespace PracticePlugin.Models
             if (this._failed || this._disposed) {
                 return;
             }
-            if (Plugin.CompatibilityPending) {
+            if (Plugin.CompatibilityPending || !_metadataPreparation.IsCompleted) {
                 _pendingSongTime = newSongTime;
                 if (!_waitingForCompatibility) {
                     _waitingForCompatibility = true;
@@ -84,6 +105,7 @@ namespace PracticePlugin.Models
                 }
                 return;
             }
+            if (_seekMetadata == null) _seekMetadata = _metadataPreparation.GetAwaiter().GetResult();
 
             var samplePos = newSongTime / this._audioTimeSyncController.songEndTime;
             var audioSource = this._audioTimeSyncController._audioSource;
@@ -101,12 +123,9 @@ namespace PracticePlugin.Models
                 item.lastProcessedNode = null;
             }
             if (this._noodleObjectsCallbacksManager != null) {
-                var noodleObjectsCallbacksManagerStartFilerSongTime = AccessTools.Field(Type.GetType("NoodleExtensions.Managers.NoodleObjectsCallbacksManager, NoodleExtensions"), "_startFilterTime");
-                noodleObjectsCallbacksManagerStartFilerSongTime.SetValue(this._noodleObjectsCallbacksManager, newSongTime + aheadTime);
-                var noodleObjectsCallbacksManagerPrevSongTime = AccessTools.Field(Type.GetType("NoodleExtensions.Managers.NoodleObjectsCallbacksManager, NoodleExtensions"), "_prevSongtime");
-                noodleObjectsCallbacksManagerPrevSongTime.SetValue(this._noodleObjectsCallbacksManager, newSongTime);
-                var noodleObjectsCallbacksManagerCallbacksIntime = AccessTools.Field(Type.GetType("NoodleExtensions.Managers.NoodleObjectsCallbacksManager, NoodleExtensions"), "_callbacksInTime");
-                if (noodleObjectsCallbacksManagerCallbacksIntime.GetValue(this._noodleObjectsCallbacksManager) is CallbacksInTime callbacks) {
+                _seekMetadata.NoodleStartFilterTime.SetValue(this._noodleObjectsCallbacksManager, newSongTime + aheadTime);
+                _seekMetadata.NoodlePreviousSongTime.SetValue(this._noodleObjectsCallbacksManager, newSongTime);
+                if (_seekMetadata.NoodleCallbacksInTime.GetValue(this._noodleObjectsCallbacksManager) is CallbacksInTime callbacks) {
                     callbacks.lastProcessedNode = null;
                 }
             }
@@ -146,21 +165,34 @@ namespace PracticePlugin.Models
 
         private void OnCompatibilityFinished(bool enabled)
         {
+            if (enabled) {
+                ResumePendingSeek();
+                return;
+            }
+            ClearPendingSeek();
+        }
+
+        private void ResumePendingSeek()
+        {
+            if (Plugin.CompatibilityPending || !_metadataPreparation.IsCompleted) return;
             float? songTime = _pendingSongTime;
+            ClearPendingSeek();
+            if (!_disposed && !_failed && songTime.HasValue && _audioTimeSyncController)
+                OnSongTimeChanged(songTime.Value);
+        }
+
+        private void ClearPendingSeek()
+        {
             _pendingSongTime = null;
             _waitingForCompatibility = false;
             Plugin.CompatibilityFinished -= OnCompatibilityFinished;
-            if (enabled && !_disposed && !_failed && songTime.HasValue && _audioTimeSyncController)
-                OnSongTimeChanged(songTime.Value);
         }
 
         public void Dispose()
         {
             if (_disposed) return;
             _disposed = true;
-            _pendingSongTime = null;
-            _waitingForCompatibility = false;
-            Plugin.CompatibilityFinished -= OnCompatibilityFinished;
+            ClearPendingSeek();
             _gameEnergyCounter.gameEnergyDidReach0Event -= OnGameEnergyCounter_gameEnergyDidReach0Event;
         }
 
@@ -195,7 +227,7 @@ namespace PracticePlugin.Models
             }
             var customNote = nc.gameObject.GetComponentInChildren(s_customNotesControllerInfo);
             if (customNote != null) {
-                s_handleNoteControllerNoteWasMissed.Invoke(customNote, new object[] { nc });
+                _seekMetadata.CustomNoteWasMissed.Invoke(customNote, new object[] { nc });
             }
         }
 
@@ -210,6 +242,91 @@ namespace PracticePlugin.Models
             this._noteCutSoundEffectManager._prevNoteBTime = -1f;
             this._beatmapCallbacksController.SetField("_startFilterTime", newSongTime + 1f);
             this._beatmapCallbacksController._prevSongTime = newSongTime;
+        }
+    }
+
+    internal static class SeekMetadataPreparation
+    {
+        internal sealed class Result
+        {
+            internal readonly FieldInfo NoodleStartFilterTime;
+            internal readonly FieldInfo NoodlePreviousSongTime;
+            internal readonly FieldInfo NoodleCallbacksInTime;
+            internal readonly MethodInfo CustomNoteWasMissed;
+
+            internal Result(FieldInfo startFilterTime, FieldInfo previousSongTime,
+                FieldInfo callbacksInTime, MethodInfo customNoteWasMissed)
+            {
+                NoodleStartFilterTime = startFilterTime;
+                NoodlePreviousSongTime = previousSongTime;
+                NoodleCallbacksInTime = callbacksInTime;
+                CustomNoteWasMissed = customNoteWasMissed;
+            }
+        }
+
+        private sealed class Request
+        {
+            internal readonly Type NoodleType;
+            internal readonly Type CustomType;
+
+            internal Request(Type noodleType, Type customType)
+            {
+                NoodleType = noodleType;
+                CustomType = customType;
+            }
+        }
+
+        private static Task<Result> _preparation;
+        private static Request _request;
+
+        internal static void Prewarm()
+        {
+            Type noodleType = null;
+            Type customType = null;
+            bool customEnabled = PluginManager.GetPlugin("CustomNotes") != null;
+            foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies()) {
+                string name = assembly.GetName().Name;
+                if (name == "NoodleExtensions")
+                    noodleType = assembly.GetType("NoodleExtensions.Managers.NoodleObjectsCallbacksManager");
+                else if (customEnabled && name == "CustomNotes")
+                    customType = assembly.GetType("CustomNotes.Components.CustomNoteController");
+            }
+            Prepare(noodleType, customType).ContinueWith(completed => {
+                _ = completed.Exception;
+            }, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted |
+                TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }
+
+        internal static Task<Result> Prepare(Type noodleType, Type customType)
+        {
+            if (_preparation != null && _request.NoodleType == noodleType &&
+                _request.CustomType == customType && !_preparation.IsFaulted && !_preparation.IsCanceled)
+                return _preparation;
+            var request = new Request(noodleType, customType);
+            Task<Result> previous = _preparation;
+            _request = request;
+            _preparation = previous == null
+                ? Task.Factory.StartNew(PrepareResult, request, CancellationToken.None,
+                    TaskCreationOptions.DenyChildAttach, TaskScheduler.Default)
+                : previous.ContinueWith(completed => {
+                    if (completed.IsFaulted) _ = completed.Exception;
+                    return PrepareResult(request);
+                }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+            return _preparation;
+        }
+
+        private static Result PrepareResult(object state)
+        {
+            var request = (Request)state;
+            MethodInfo customMethod = request.CustomType?.GetMethod(
+                "HandleNoteControllerNoteWasMissed", BindingFlags.Instance | BindingFlags.Public);
+            FieldInfo startFilterTime = request.NoodleType == null ? null
+                : AccessTools.Field(request.NoodleType, "_startFilterTime");
+            FieldInfo previousSongTime = request.NoodleType == null ? null
+                : AccessTools.Field(request.NoodleType, "_prevSongtime");
+            FieldInfo callbacksInTime = request.NoodleType == null ? null
+                : AccessTools.Field(request.NoodleType, "_callbacksInTime");
+            return new Result(startFilterTime, previousSongTime, callbacksInTime, customMethod);
         }
     }
 }
