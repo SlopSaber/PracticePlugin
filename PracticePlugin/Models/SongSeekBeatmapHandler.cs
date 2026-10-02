@@ -10,7 +10,7 @@ using Zenject;
 
 namespace PracticePlugin.Models
 {
-    public class SongSeekBeatmapHandler
+    public class SongSeekBeatmapHandler : IDisposable
     {
 
         [Inject]
@@ -58,6 +58,9 @@ namespace PracticePlugin.Models
         private readonly IGameEnergyCounter _gameEnergyCounter;
         private bool _noFailOn0Energy;
         private bool _failed;
+        private float? _pendingSongTime;
+        private bool _waitingForCompatibility;
+        private bool _disposed;
 
         static SongSeekBeatmapHandler()
         {
@@ -70,7 +73,15 @@ namespace PracticePlugin.Models
 
         public void OnSongTimeChanged(float newSongTime)
         {
-            if (this._failed) {
+            if (this._failed || this._disposed) {
+                return;
+            }
+            if (Plugin.CompatibilityPending) {
+                _pendingSongTime = newSongTime;
+                if (!_waitingForCompatibility) {
+                    _waitingForCompatibility = true;
+                    Plugin.CompatibilityFinished += OnCompatibilityFinished;
+                }
                 return;
             }
 
@@ -131,6 +142,26 @@ namespace PracticePlugin.Models
                     item.enabled = false;
                 }
             }
+        }
+
+        private void OnCompatibilityFinished(bool enabled)
+        {
+            float? songTime = _pendingSongTime;
+            _pendingSongTime = null;
+            _waitingForCompatibility = false;
+            Plugin.CompatibilityFinished -= OnCompatibilityFinished;
+            if (enabled && !_disposed && !_failed && songTime.HasValue && _audioTimeSyncController)
+                OnSongTimeChanged(songTime.Value);
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _pendingSongTime = null;
+            _waitingForCompatibility = false;
+            Plugin.CompatibilityFinished -= OnCompatibilityFinished;
+            _gameEnergyCounter.gameEnergyDidReach0Event -= OnGameEnergyCounter_gameEnergyDidReach0Event;
         }
 
         /// <summary>

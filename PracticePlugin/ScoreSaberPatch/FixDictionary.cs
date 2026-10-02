@@ -6,6 +6,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace PracticePlugin.ScoreSaberPatch
 {
@@ -14,6 +16,50 @@ namespace PracticePlugin.ScoreSaberPatch
     {
         private static FieldInfo s_fieldInfo = null;
         private static readonly Type[] s_argumentTypes = new Type[] { typeof(NoteController), typeof(NoteCutInfo).MakeByRefType() };
+        private static Assembly s_discoveryAssembly;
+        private static Task<DiscoveryResult> s_discoveryTask;
+        private static MethodBase s_preparedMethod;
+        private static bool s_discoveryPublished;
+
+        internal sealed class DiscoveryResult
+        {
+            internal readonly MethodBase Method;
+            internal readonly FieldInfo Field;
+
+            internal DiscoveryResult(MethodBase method, FieldInfo field)
+            {
+                Method = method;
+                Field = field;
+            }
+        }
+
+        internal static Task<DiscoveryResult> PrepareDiscovery(bool logUnavailable = true)
+        {
+            Assembly assembly = GetScoreSaberAssembly(logUnavailable);
+            if (assembly == null) return Task.FromResult<DiscoveryResult>(null);
+            if (s_discoveryTask != null && assembly == s_discoveryAssembly &&
+                !s_discoveryTask.IsFaulted && !s_discoveryTask.IsCanceled) return s_discoveryTask;
+
+            Task<DiscoveryResult> previous = s_discoveryTask;
+            s_discoveryAssembly = assembly;
+            s_discoveryPublished = false;
+            s_discoveryTask = previous == null
+                ? Task.Factory.StartNew(Discover, assembly, CancellationToken.None,
+                    TaskCreationOptions.DenyChildAttach, TaskScheduler.Default)
+                : previous.ContinueWith(completed => {
+                    if (completed.IsFaulted) _ = completed.Exception;
+                    return Discover(assembly);
+                }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+            return s_discoveryTask;
+        }
+
+        internal static void PublishDiscovery(DiscoveryResult result)
+        {
+            s_preparedMethod = result?.Method;
+            if (s_fieldInfo == null) s_fieldInfo = result?.Field;
+            s_discoveryPublished = true;
+            if (result != null && result.Method == null) Logger.Info("Not found target method.");
+        }
 
         /// <summary>
         /// パッチを当てるかどうか
@@ -37,9 +83,23 @@ namespace PracticePlugin.ScoreSaberPatch
             if (original != null) {
                 return original;
             }
+            if (s_discoveryPublished) return s_preparedMethod;
+            if (s_discoveryTask != null && s_discoveryTask.Status == TaskStatus.RanToCompletion) {
+                PublishDiscovery(s_discoveryTask.GetAwaiter().GetResult());
+                return s_preparedMethod;
+            }
+            Assembly scoreSaberAssembly = GetScoreSaberAssembly(true);
+            if (scoreSaberAssembly == null) return null;
+            DiscoveryResult result = Discover(scoreSaberAssembly);
+            PublishDiscovery(result);
+            return result.Method;
+        }
+
+        private static Assembly GetScoreSaberAssembly(bool logUnavailable)
+        {
             var scoreSaberInfo = PluginManager.GetPlugin("ScoreSaber");
             if (scoreSaberInfo == null) {
-                Logger.Info("ScoreSaber not loaded.");
+                if (logUnavailable) Logger.Info("ScoreSaber not loaded.");
                 return null;
             }
             var scoresaberPath = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "ScoreSaber.dll");
@@ -48,13 +108,19 @@ namespace PracticePlugin.ScoreSaberPatch
                 scoreSaberAssembly = Assembly.LoadFrom(scoresaberPath);
             }
             catch (FileNotFoundException) {
-                Logger.Info("ScoreSaber failed load");
+                if (logUnavailable) Logger.Info("ScoreSaber failed load");
                 return null;
             }
             catch (Exception e) {
-                Logger.Error(e);
+                if (logUnavailable) Logger.Error(e);
                 return null;
             }
+            return scoreSaberAssembly;
+        }
+
+        private static DiscoveryResult Discover(object state)
+        {
+            Assembly scoreSaberAssembly = (Assembly)state;
             var affinies = scoreSaberAssembly.GetTypes().Where(x => typeof(IAffinity).IsAssignableFrom(x) && x.IsClass && !x.IsAbstract && !x.IsInterface);
             foreach (var affinityType in affinies) {
                 var methodInfos = affinityType
@@ -64,15 +130,12 @@ namespace PracticePlugin.ScoreSaberPatch
                 foreach (var methodInfo in methodInfos) {
                     var arguments = methodInfo.GetParameters().Select(x => x.ParameterType).ToArray();
                     if (arguments.SequenceEqual(s_argumentTypes)) {
-                        if (s_fieldInfo == null) {
-                            s_fieldInfo = affinityType.GetFields(BindingFlags.NonPublic | BindingFlags.Instance).FirstOrDefault(x => x.FieldType.Equals(typeof(Dictionary<NoteData, NoteCutInfo>)));
-                        }
-                        return methodInfo;
+                        FieldInfo field = affinityType.GetFields(BindingFlags.NonPublic | BindingFlags.Instance).FirstOrDefault(x => x.FieldType.Equals(typeof(Dictionary<NoteData, NoteCutInfo>)));
+                        return new DiscoveryResult(methodInfo, field);
                     }
                 }
             }
-            Logger.Info("Not found target method.");
-            return null;
+            return new DiscoveryResult(null, null);
         }
 
         /// <summary>
