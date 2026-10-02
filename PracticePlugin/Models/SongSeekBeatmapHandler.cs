@@ -36,6 +36,7 @@ namespace PracticePlugin.Models
             this._noFailOn0Energy = gameplayModifiers.noFailOn0Energy;
             this._failed = false;
             var callBackManager = Type.GetType("NoodleExtensions.Managers.NoodleObjectsCallbacksManager, NoodleExtensions");
+            _noodleCallbacksType = callBackManager;
             if (callBackManager != null) {
                 this._noodleObjectsCallbacksManager = di.TryResolve(callBackManager);
             }
@@ -71,6 +72,7 @@ namespace PracticePlugin.Models
         private readonly AudioTimeSyncController _audioTimeSyncController;
         private readonly BasicBeatmapObjectManager _beatmapObjectManager;
         private readonly object _noodleObjectsCallbacksManager;
+        private readonly Type _noodleCallbacksType;
         private static readonly Type s_customNotesControllerInfo = null;
         private static readonly float s_minAheadTime = 1f;
         private SliderInteractionManager[] _sliderInteractionManager = null;
@@ -123,9 +125,9 @@ namespace PracticePlugin.Models
                 item.lastProcessedNode = null;
             }
             if (this._noodleObjectsCallbacksManager != null) {
-                _seekMetadata.NoodleStartFilterTime.SetValue(this._noodleObjectsCallbacksManager, newSongTime + aheadTime);
-                _seekMetadata.NoodlePreviousSongTime.SetValue(this._noodleObjectsCallbacksManager, newSongTime);
-                if (_seekMetadata.NoodleCallbacksInTime.GetValue(this._noodleObjectsCallbacksManager) is CallbacksInTime callbacks) {
+                GetNoodleField(_seekMetadata.NoodleStartFilterTime, "_startFilterTime").SetValue(this._noodleObjectsCallbacksManager, newSongTime + aheadTime);
+                GetNoodleField(_seekMetadata.NoodlePreviousSongTime, "_prevSongtime").SetValue(this._noodleObjectsCallbacksManager, newSongTime);
+                if (GetNoodleField(_seekMetadata.NoodleCallbacksInTime, "_callbacksInTime").GetValue(this._noodleObjectsCallbacksManager) is CallbacksInTime callbacks) {
                     callbacks.lastProcessedNode = null;
                 }
             }
@@ -264,6 +266,11 @@ namespace PracticePlugin.Models
             }
         }
 
+        private FieldInfo GetNoodleField(FieldInfo prepared, string name)
+        {
+            return prepared ?? AccessTools.Field(_noodleCallbacksType, name);
+        }
+
         private sealed class Request
         {
             internal readonly Type NoodleType;
@@ -321,12 +328,22 @@ namespace PracticePlugin.Models
             MethodInfo customMethod = request.CustomType?.GetMethod(
                 "HandleNoteControllerNoteWasMissed", BindingFlags.Instance | BindingFlags.Public);
             FieldInfo startFilterTime = request.NoodleType == null ? null
-                : AccessTools.Field(request.NoodleType, "_startFilterTime");
+                : FindField(request.NoodleType, "_startFilterTime");
             FieldInfo previousSongTime = request.NoodleType == null ? null
-                : AccessTools.Field(request.NoodleType, "_prevSongtime");
+                : FindField(request.NoodleType, "_prevSongtime");
             FieldInfo callbacksInTime = request.NoodleType == null ? null
-                : AccessTools.Field(request.NoodleType, "_callbacksInTime");
+                : FindField(request.NoodleType, "_callbacksInTime");
             return new Result(startFilterTime, previousSongTime, callbacksInTime, customMethod);
+        }
+
+        private static FieldInfo FindField(Type type, string name)
+        {
+            while (type != null) {
+                FieldInfo field = type.GetField(name, AccessTools.all);
+                if (field != null) return field;
+                type = type.BaseType;
+            }
+            return null;
         }
     }
 }
