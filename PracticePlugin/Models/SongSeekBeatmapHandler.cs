@@ -233,6 +233,11 @@ namespace PracticePlugin.Models
             }
         }
 
+        private FieldInfo GetNoodleField(FieldInfo prepared, string name)
+        {
+            return prepared ?? AccessTools.Field(_noodleCallbacksType, name);
+        }
+
         public void ChangeSongStartTime(float newSongTime)
         {
             this._audioTimeSyncController._prevAudioSamplePos = -1;
@@ -266,10 +271,6 @@ namespace PracticePlugin.Models
             }
         }
 
-        private FieldInfo GetNoodleField(FieldInfo prepared, string name)
-        {
-            return prepared ?? AccessTools.Field(_noodleCallbacksType, name);
-        }
 
         private sealed class Request
         {
